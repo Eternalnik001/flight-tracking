@@ -3,81 +3,181 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>BLR → domestic India flight tracker</title>
+  <title>FlightTracker — Bengaluru to India</title>
   <style>
-    :root { --line:#dde1e6; --muted:#667085; --bg:#f7f8fa; --up:#b00020; --down:#0a7d2c; }
-    * { box-sizing: border-box; }
-    body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; color:#1a1a1a;
-           margin:0; background:var(--bg); }
-    .wrap { max-width: 960px; margin: 0 auto; padding: 24px 16px 64px; }
-    h1 { font-size: 22px; margin: 0 0 2px; }
-    .sub { color: var(--muted); font-size: 13px; margin: 0 0 20px; }
-    .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:20px; }
-    h2 { font-size: 15px; margin: 0 0 12px; }
-    .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-    input[type=search] { flex:1; min-width:200px; padding:9px 11px; border:1px solid var(--line);
-                         border-radius:8px; font-size:14px; }
-    button { background:#111827; color:#fff; border:0; border-radius:8px; padding:9px 14px;
-             font-size:14px; cursor:pointer; }
-    button.secondary { background:#fff; color:#111827; border:1px solid var(--line); }
-    button:disabled { opacity:.5; cursor:default; }
-    .chips { display:flex; flex-wrap:wrap; gap:6px; margin:12px 0 0; }
-    .chip { display:inline-flex; align-items:center; gap:6px; background:#eef2ff; color:#3730a3;
-            border-radius:999px; padding:4px 10px; font-size:13px; }
-    .chip b { font-weight:700; }
-    .chip span { cursor:pointer; font-weight:700; }
-    .opts { max-height:260px; overflow:auto; border:1px solid var(--line); border-radius:8px; margin-top:10px; }
-    .opt { display:flex; align-items:center; gap:10px; padding:8px 12px; border-bottom:1px solid #eef0f3;
-           cursor:pointer; font-size:14px; }
-    .opt:last-child { border-bottom:0; }
-    .opt:hover { background:#f5f7ff; }
-    .opt .code { font-weight:700; width:42px; }
-    .opt .st { color:var(--muted); margin-left:auto; font-size:12px; }
-    table { border-collapse:collapse; width:100%; font-size:13px; }
-    th, td { border:1px solid var(--line); padding:8px 10px; text-align:left; }
-    th { background:#f2f4f7; }
-    .price { font-weight:700; }
-    .down { color:var(--down); } .up { color:var(--up); }
-    .empty { color:var(--muted); font-size:13px; }
-    .toast { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); background:#111827;
-             color:#fff; padding:10px 16px; border-radius:8px; font-size:13px; opacity:0;
-             transition:opacity .2s; pointer-events:none; }
-    .toast.show { opacity:1; }
-    .banner { background:#fff7ed; border:1px solid #fed7aa; color:#9a3412; font-size:13px;
-              border-radius:8px; padding:10px 12px; margin-bottom:20px; }
-    .greeting { font-size:15px; color:#3730a3; background:#eef2ff; border:1px solid #c7d2fe;
-                border-radius:8px; padding:10px 14px; margin:0 0 16px; font-weight:600; }
+    :root {
+      --bg: #fbfbfd; --bg-elev: #ffffff; --text: #1d1d1f; --text-2: #6e6e73;
+      --hairline: #d2d2d7; --accent: #0071e3; --accent-2: #6e2ce0;
+      --good: #1d8a4e; --bad: #c1121f; --chip: #f5f5f7;
+      --shadow: 0 4px 24px rgba(0,0,0,.06); --shadow-hi: 0 12px 40px rgba(0,0,0,.12);
+      --radius: 20px; --nav-h: 52px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #000000; --bg-elev: #1c1c1e; --text: #f5f5f7; --text-2: #a1a1a6;
+        --hairline: #38383a; --accent: #2997ff; --accent-2: #bf5af2;
+        --good: #30d158; --bad: #ff453a; --chip: #2c2c2e;
+        --shadow: 0 4px 24px rgba(0,0,0,.5); --shadow-hi: 0 12px 40px rgba(0,0,0,.7);
+      }
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: "SF Pro Display","SF Pro Text",-apple-system,BlinkMacSystemFont,
+                   "Helvetica Neue",Helvetica,Arial,sans-serif;
+      background: var(--bg); color: var(--text); -webkit-font-smoothing: antialiased;
+      line-height: 1.47; letter-spacing: -0.01em;
+    }
+    .wrap { max-width: 1040px; margin: 0 auto; padding: 0 22px; }
+
+    /* ---- frosted nav ---- */
+    .nav {
+      position: sticky; top: 0; z-index: 50; height: var(--nav-h);
+      background: color-mix(in srgb, var(--bg) 72%, transparent);
+      backdrop-filter: saturate(180%) blur(20px);
+      -webkit-backdrop-filter: saturate(180%) blur(20px);
+      border-bottom: 1px solid var(--hairline);
+    }
+    .nav-inner { max-width: 1040px; margin: 0 auto; padding: 0 22px; height: 100%;
+      display: flex; align-items: center; justify-content: space-between; }
+    .brand { font-weight: 600; font-size: 17px; letter-spacing: -0.02em; }
+    .brand .dot { color: var(--accent); }
+    .nav-greet { font-size: 13px; color: var(--text-2); }
+
+    /* ---- hero ---- */
+    .hero { text-align: center; padding: 70px 0 30px; }
+    .hero h1 {
+      font-size: clamp(38px, 6vw, 64px); font-weight: 700; line-height: 1.06;
+      letter-spacing: -0.03em;
+      background: linear-gradient(120deg, var(--text), var(--accent) 60%, var(--accent-2));
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    .hero p { font-size: clamp(17px, 2.4vw, 21px); color: var(--text-2); margin: 16px auto 0; max-width: 600px; }
+    .stats { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; margin-top: 34px; }
+    .stat { background: var(--bg-elev); border: 1px solid var(--hairline); border-radius: 16px;
+      padding: 16px 22px; min-width: 150px; box-shadow: var(--shadow); }
+    .stat .k { font-size: 12px; color: var(--text-2); text-transform: uppercase; letter-spacing: .06em; }
+    .stat .v { font-size: 24px; font-weight: 700; margin-top: 4px; letter-spacing: -0.02em; }
+    .stat .v small { font-size: 14px; font-weight: 500; color: var(--text-2); }
+
+    /* ---- sections ---- */
+    .section { padding: 44px 0; }
+    .section-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 6px; }
+    .section-title { font-size: clamp(26px, 4vw, 40px); font-weight: 700; letter-spacing: -0.02em; }
+    .section-sub { color: var(--text-2); font-size: 15px; margin-top: 6px; }
+    .updated { font-size: 13px; color: var(--text-2); }
+
+    /* ---- segmented control ---- */
+    .seg { display: inline-flex; background: var(--chip); border-radius: 980px; padding: 3px; margin: 22px 0 26px; }
+    .seg-btn { border: 0; background: transparent; color: var(--text); font: inherit; font-weight: 500;
+      font-size: 15px; padding: 8px 22px; border-radius: 980px; cursor: pointer; transition: .25s; }
+    .seg-btn.active { background: var(--bg-elev); box-shadow: 0 1px 3px rgba(0,0,0,.18); }
+
+    /* ---- destination cards ---- */
+    .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 16px; }
+    .card { position: relative; background: var(--bg-elev); border: 1px solid var(--hairline);
+      border-radius: var(--radius); padding: 22px; box-shadow: var(--shadow);
+      transition: transform .3s cubic-bezier(.2,.7,.3,1), box-shadow .3s;
+      animation: rise .5s both; }
+    .card:hover { transform: translateY(-6px); box-shadow: var(--shadow-hi); }
+    .card .city { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }
+    .card .code { font-size: 13px; color: var(--text-2); margin-left: 6px; }
+    .card .price { font-size: 32px; font-weight: 700; letter-spacing: -0.03em; margin: 14px 0 2px; }
+    .card .meta { font-size: 13px; color: var(--text-2); }
+    .card .badge { position: absolute; top: 16px; right: 16px; font-size: 11px; font-weight: 600;
+      color: #fff; background: linear-gradient(120deg, var(--accent), var(--accent-2));
+      padding: 4px 10px; border-radius: 980px; letter-spacing: .02em; }
+    @keyframes rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+
+    /* ---- empty state ---- */
+    .empty { background: var(--bg-elev); border: 1px dashed var(--hairline); border-radius: var(--radius);
+      padding: 36px; text-align: center; color: var(--text-2); font-size: 15px; }
+    .empty b { color: var(--text); }
+
+    /* ---- watchlist editor ---- */
+    .wl-bar { display: flex; gap: 10px; align-items: center; margin: 22px 0 14px; flex-wrap: wrap; }
+    input[type=search] { flex: 1; min-width: 220px; font: inherit; font-size: 16px; color: var(--text);
+      background: var(--bg-elev); border: 1px solid var(--hairline); border-radius: 12px; padding: 12px 16px; }
+    input[type=search]:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent); }
+    .btn-primary { border: 0; background: var(--accent); color: #fff; font: inherit; font-weight: 500;
+      font-size: 16px; padding: 12px 24px; border-radius: 980px; cursor: pointer; transition: .2s; }
+    .btn-primary:hover { filter: brightness(1.06); }
+    .btn-primary:disabled { opacity: .4; cursor: default; }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+    .chip { display: inline-flex; align-items: center; gap: 8px; background: var(--chip);
+      border-radius: 980px; padding: 7px 14px; font-size: 14px; font-weight: 500; }
+    .chip b { color: var(--accent); }
+    .chip .x { cursor: pointer; color: var(--text-2); font-weight: 700; }
+    .chip .x:hover { color: var(--bad); }
+    .opts { background: var(--bg-elev); border: 1px solid var(--hairline); border-radius: 16px;
+      max-height: 320px; overflow: auto; }
+    .opt { display: flex; align-items: center; gap: 14px; padding: 13px 18px; cursor: pointer;
+      border-bottom: 1px solid var(--hairline); font-size: 15px; transition: background .15s; }
+    .opt:last-child { border-bottom: 0; }
+    .opt:hover { background: var(--chip); }
+    .opt input { width: 19px; height: 19px; accent-color: var(--accent); }
+    .opt .c { font-weight: 600; width: 46px; }
+    .opt .s { margin-left: auto; color: var(--text-2); font-size: 13px; }
+
+    /* ---- misc ---- */
+    .banner { background: color-mix(in srgb, var(--bad) 12%, var(--bg-elev)); border: 1px solid var(--bad);
+      color: var(--bad); border-radius: 14px; padding: 14px 18px; font-size: 14px; margin: 20px 0; display: none; }
+    footer { text-align: center; color: var(--text-2); font-size: 13px; padding: 40px 0 60px;
+      border-top: 1px solid var(--hairline); margin-top: 30px; }
+    .toast { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%) translateY(16px);
+      background: var(--text); color: var(--bg); padding: 13px 22px; border-radius: 14px; font-size: 14px;
+      font-weight: 500; opacity: 0; transition: .3s; pointer-events: none; box-shadow: var(--shadow-hi); }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
   </style>
 </head>
 <body>
+  <nav class="nav">
+    <div class="nav-inner">
+      <span class="brand">✈ Flight<span class="dot">Tracker</span></span>
+      <span id="greeting" class="nav-greet"></span>
+    </div>
+  </nav>
+
   <div class="wrap">
-    <p id="greeting" class="greeting" style="display:none"></p>
-    <h1>Bengaluru (BLR) → domestic India</h1>
-    <p class="sub">Origin is locked to Bengaluru. Pick destinations to watch; the daily job
-      scans them and the prices show below. 3-night / 4-day round trips in November.</p>
+    <header class="hero">
+      <h1>Bengaluru,<br>to anywhere in India.</h1>
+      <p>The cheapest 4-day round trips, tracked every day — automatically, for free.</p>
+      <div id="stats" class="stats"></div>
+    </header>
 
-    <div id="banner" class="banner" style="display:none"></div>
+    <div id="banner" class="banner"></div>
 
-    <div class="card">
-      <h2>Watchlist — destinations to track</h2>
-      <div class="row">
-        <input id="search" type="search" placeholder="Search city or state (e.g. Goa, Kerala, Mumbai)…" />
-        <button id="save" disabled>Save watchlist</button>
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <div class="section-title">Cheapest fare per route</div>
+          <div class="section-sub">Best 3-night round trip found per destination.</div>
+        </div>
+        <div id="updated" class="updated"></div>
+      </div>
+      <div class="seg" id="seg">
+        <button class="seg-btn" data-month="8">August</button>
+        <button class="seg-btn" data-month="11">November</button>
+      </div>
+      <div id="cards" class="cards"></div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">Your watchlist</div>
+      <div class="section-sub">Pick the destinations to track. Origin stays locked to Bengaluru (BLR).</div>
+      <div class="wl-bar">
+        <input id="search" type="search" placeholder="Search city or state — Goa, Kerala, Mumbai…" />
+        <button id="save" class="btn-primary" disabled>Save watchlist</button>
       </div>
       <div id="chips" class="chips"></div>
       <div id="opts" class="opts"></div>
-    </div>
-
-    <div class="card">
-      <h2>Cheapest fare per route — November <span id="runat" class="empty"></span></h2>
-      <div id="dash-nov"></div>
-    </div>
-
-    <div class="card">
-      <h2>Cheapest fare per route — August</h2>
-      <div id="dash-aug"></div>
-    </div>
+    </section>
   </div>
+
+  <footer>
+    Cached fares are indicative (Aviasales); confirmed live against Google Flights when prices drop.
+    Built with free APIs · runs daily on GitHub Actions.
+  </footer>
 
   <div id="toast" class="toast"></div>
 

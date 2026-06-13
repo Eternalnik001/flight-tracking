@@ -1,43 +1,38 @@
-// Watchlist editor + read-only dashboard, talking straight to Supabase via the
-// anon key. The Python job (running as the DB owner) bypasses RLS; this page is
-// constrained by the policies in supabase_setup.sql.
+// Drives the Apple-style frontend: hero stats, month-segmented destination
+// cards, and the watchlist editor. Talks straight to Supabase via the anon key;
+// the Python job (DB owner) bypasses RLS. Page is constrained by supabase_setup.sql.
 (function () {
   const cfg = window.CONFIG;
   const ORIGIN = cfg.ORIGIN || "BLR";
   const byCode = Object.fromEntries(window.AIRPORTS.map((a) => [a.iata, a]));
   const $ = (id) => document.getElementById(id);
+  const rupee = (n) => "₹" + Math.round(n).toLocaleString("en-IN");
+  const MONTHS = { 8: "August", 11: "November" };
 
   // ---- toast / banner ----
   let toastT;
   function toast(msg) {
     const t = $("toast"); t.textContent = msg; t.classList.add("show");
-    clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 2200);
+    clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 2400);
   }
   function showBanner(msg) { const b = $("banner"); b.textContent = msg; b.style.display = "block"; }
 
   // ---- personalised greeting (independent of the database) ----
-  // Share a link like  https://your-site/?name=Nikhil  and the page greets them
-  // on click, then remembers it (localStorage) for return visits. Name is read
-  // from the URL and rendered via textContent only, so it can't inject HTML.
+  // Share https://your-site/?name=Nikhil → greets on click, remembered after.
+  // Rendered via textContent only, so a name can never inject HTML.
   const STORE_KEY = "flighttracker_name";
   function greet() {
-    const params = new URLSearchParams(location.search);
-    let name = params.get("name") || params.get("u");
-    if (name) {
-      name = name.trim().slice(0, 40);
-      localStorage.setItem(STORE_KEY, name);
-    } else {
-      name = localStorage.getItem(STORE_KEY);
-    }
+    const p = new URLSearchParams(location.search);
+    let name = p.get("name") || p.get("u");
+    if (name) { name = name.trim().slice(0, 40); localStorage.setItem(STORE_KEY, name); }
+    else name = localStorage.getItem(STORE_KEY);
     if (!name) return;
     const pretty = name.charAt(0).toUpperCase() + name.slice(1);
-    const hour = new Date().getHours();
-    const part = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
-    const el = $("greeting");
-    el.textContent = `👋 ${part}, ${pretty} — welcome back to your flight tracker.`;
-    el.style.display = "block";
+    const h = new Date().getHours();
+    const part = h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
+    $("greeting").textContent = `${part}, ${pretty} 👋`;
   }
-  greet();  // run before the Supabase guard, so the welcome shows even pre-config
+  greet();
 
   if (!cfg.SUPABASE_ANON_KEY || cfg.SUPABASE_ANON_KEY.includes("PASTE_YOUR")) {
     showBanner("Set SUPABASE_ANON_KEY in config.js — see the comment in that file.");
@@ -45,11 +40,90 @@
   }
   const db = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
 
-  let selected = new Set(); // current watchlist (what's saved)
-  let draft = new Set();     // edits not yet saved
+  // ===================== DASHBOARD =====================
+  let priceRows = [];   // cheapest rows across all months
+  let activeMonth = 8;
+
+  async function loadDashboard() {
+    const { data, error } = await db.from("latest").select("dest,depart,price,captured_at")
+      .eq("fare_type", "cheapest");
+    if (error) { showBanner("Could not read prices: " + error.message); return; }
+    priceRows = (data || []).filter((r) => r.price != null);
+
+    // default to whichever tracked month actually has data
+    const has = (m) => priceRows.some((r) => +r.depart.slice(5, 7) === m);
+    activeMonth = has(8) ? 8 : has(11) ? 11 : 8;
+
+    renderStats();
+    renderUpdated();
+    setupSegments();
+    renderCards();
+  }
+
+  function bestPerDest(month) {
+    const mm = String(month).padStart(2, "0");
+    const best = {};
+    for (const r of priceRows) {
+      if (r.depart.slice(5, 7) !== mm) continue;
+      if (!best[r.dest] || r.price < best[r.dest].price) best[r.dest] = r;
+    }
+    return Object.entries(best).map(([dest, r]) => ({ dest, ...r }))
+      .sort((a, b) => a.price - b.price);
+  }
+
+  function renderStats() {
+    const el = $("stats");
+    if (!priceRows.length) { el.innerHTML = ""; return; }
+    const cheapest = priceRows.reduce((m, r) => (r.price < m.price ? r : m));
+    const city = byCode[cheapest.dest]?.city || cheapest.dest;
+    const routes = new Set(priceRows.map((r) => r.dest)).size;
+    el.innerHTML = `
+      <div class="stat"><div class="k">Cheapest right now</div>
+        <div class="v">${rupee(cheapest.price)}</div>
+        <div class="meta" style="font-size:13px;color:var(--text-2)">to ${city}</div></div>
+      <div class="stat"><div class="k">Routes with prices</div>
+        <div class="v">${routes}</div></div>
+      <div class="stat"><div class="k">Cost to run</div>
+        <div class="v">₹0 <small>/ forever</small></div></div>`;
+  }
+
+  function renderUpdated() {
+    const t = priceRows.find((r) => r.captured_at)?.captured_at;
+    if (t) $("updated").textContent = "Updated " + new Date(t).toLocaleString();
+  }
+
+  function setupSegments() {
+    $("seg").querySelectorAll(".seg-btn").forEach((b) => {
+      b.classList.toggle("active", +b.dataset.month === activeMonth);
+      b.onclick = () => { activeMonth = +b.dataset.month; setupSegments(); renderCards(); };
+    });
+  }
+
+  function renderCards() {
+    const el = $("cards");
+    const rows = bestPerDest(activeMonth);
+    if (!rows.length) {
+      el.innerHTML = `<div class="empty" style="grid-column:1/-1">
+        <b>No ${MONTHS[activeMonth]} fares yet.</b><br>The free cache only holds fares a few months
+        ahead, so they appear closer to travel. The daily job keeps checking.</div>`;
+      return;
+    }
+    el.innerHTML = rows.map((r, i) => {
+      const a = byCode[r.dest];
+      const d = new Date(r.depart).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+      return `<div class="card" style="animation-delay:${i * 45}ms">
+        ${i === 0 ? '<span class="badge">Best deal</span>' : ""}
+        <div><span class="city">${a ? a.city : r.dest}</span><span class="code">${r.dest}</span></div>
+        <div class="price">${rupee(r.price)}</div>
+        <div class="meta">Depart ${d} · ${a ? a.state : ""}</div>
+      </div>`;
+    }).join("");
+  }
+
+  // ===================== WATCHLIST =====================
+  let selected = new Set(), draft = new Set();
   const search = $("search"), opts = $("opts"), chips = $("chips"), saveBtn = $("save");
 
-  // ---- watchlist ----
   async function loadWatchlist() {
     const { data, error } = await db.from("watchlist").select("dest")
       .eq("origin", ORIGIN).eq("enabled", true);
@@ -64,8 +138,8 @@
       .sort((a, b) => a.city.localeCompare(b.city));
     chips.innerHTML = items.length
       ? items.map((a) => `<span class="chip"><b>${a.iata}</b> ${a.city}
-          <span data-rm="${a.iata}" title="remove">×</span></span>`).join("")
-      : `<span class="empty">No destinations selected yet.</span>`;
+          <span class="x" data-rm="${a.iata}" title="remove">×</span></span>`).join("")
+      : `<span class="section-sub">No destinations selected yet.</span>`;
     chips.querySelectorAll("[data-rm]").forEach((el) =>
       el.onclick = () => { draft.delete(el.dataset.rm); syncDirty(); renderChips(); renderOpts(); });
   }
@@ -80,9 +154,9 @@
     opts.innerHTML = list.map((a) => `
       <label class="opt">
         <input type="checkbox" data-iata="${a.iata}" ${draft.has(a.iata) ? "checked" : ""} />
-        <span class="code">${a.iata}</span> ${a.city}
-        <span class="st">${a.state}</span>
-      </label>`).join("") || `<div class="opt empty">No matches.</div>`;
+        <span class="c">${a.iata}</span> ${a.city}
+        <span class="s">${a.state}</span>
+      </label>`).join("") || `<div class="opt">No matches.</div>`;
     opts.querySelectorAll("input[data-iata]").forEach((cb) =>
       cb.onchange = () => {
         cb.checked ? draft.add(cb.dataset.iata) : draft.delete(cb.dataset.iata);
@@ -107,57 +181,15 @@
         if (error) throw error;
       }
       if (toRemove.length) {
-        const { error } = await db.from("watchlist").delete()
-          .eq("origin", ORIGIN).in("dest", toRemove);
+        const { error } = await db.from("watchlist").delete().eq("origin", ORIGIN).in("dest", toRemove);
         if (error) throw error;
       }
       selected = new Set(draft);
-      toast("Watchlist saved — next daily run will use it.");
+      toast("Watchlist saved — the next daily run will use it.");
     } catch (e) {
       toast("Save failed: " + (e.message || e));
       saveBtn.disabled = false;
     }
-  }
-
-  // ---- dashboard ----
-  // One window per month; rows are filtered by the depart date's month so August
-  // and November fares (which share the latest table) render separately.
-  function renderMonthSection(allRows, monthNum, containerId) {
-    const el = $(containerId);
-    const mm = String(monthNum).padStart(2, "0");
-    const rows = allRows.filter((r) => r.price != null && r.depart.slice(5, 7) === mm);
-    if (!rows.length) {
-      el.innerHTML = `<div class="empty">No prices stored for this month yet. The free cache
-        only holds fares a few months ahead and fills in closer to travel — the daily job keeps
-        trying.</div>`;
-      return;
-    }
-    const best = {};
-    for (const r of rows) {
-      if (!best[r.dest] || r.price < best[r.dest].price) best[r.dest] = r;
-    }
-    const body = Object.entries(best).sort((a, b) => a[1].price - b[1].price).map(([dest, r]) => {
-      const a = byCode[dest];
-      const name = a ? `${a.city} <span class="empty">(${dest})</span>` : dest;
-      return `<tr><td>${name}</td><td>${r.depart}</td>
-        <td class="price">₹${Math.round(r.price).toLocaleString("en-IN")}</td></tr>`;
-    }).join("");
-    el.innerHTML = `<table><tr><th>Destination</th><th>Best depart date</th>
-      <th>Cheapest round trip</th></tr>${body}</table>`;
-  }
-
-  async function loadDashboard() {
-    const { data, error } = await db.from("latest").select("dest,depart,price,captured_at")
-      .eq("fare_type", "cheapest");
-    if (error) {
-      const msg = `<div class="empty">Could not read prices: ${error.message}</div>`;
-      $("dash-nov").innerHTML = msg; $("dash-aug").innerHTML = msg;
-      return;
-    }
-    renderMonthSection(data, 11, "dash-nov");
-    renderMonthSection(data, 8, "dash-aug");
-    const t = data.find((r) => r.captured_at)?.captured_at;
-    if (t) $("runat").textContent = "· updated " + new Date(t).toLocaleString();
   }
 
   // ---- wire up ----
