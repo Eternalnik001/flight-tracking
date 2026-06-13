@@ -175,8 +175,82 @@
         <div><span class="city">${a ? a.city : r.dest}</span><span class="code">${a ? a.state : ""}</span></div>
         <div class="price">${rupee(r.price)}</div>
         <div class="meta"><span class="kind ${cls}">${r.kind}</span> · Depart ${d}</div>
+        <div class="wx" data-wx="${r.dest}"><span class="wx-load">Loading weather…</span></div>
       </div>`;
     }).join("");
+    loadWeather(rows);
+  }
+
+  // ===================== WEATHER + AIR QUALITY =====================
+  // Open-Meteo: free, no API key, CORS-enabled. Both endpoints take comma-separated
+  // coords, so all visible cards are covered in ONE weather call + ONE AQI call.
+  const WMO = {
+    0: ["☀️", "Clear"], 1: ["🌤️", "Mainly clear"], 2: ["⛅", "Partly cloudy"], 3: ["☁️", "Overcast"],
+    45: ["🌫️", "Fog"], 48: ["🌫️", "Rime fog"],
+    51: ["🌦️", "Light drizzle"], 53: ["🌦️", "Drizzle"], 55: ["🌦️", "Heavy drizzle"],
+    61: ["🌧️", "Light rain"], 63: ["🌧️", "Rain"], 65: ["🌧️", "Heavy rain"],
+    66: ["🌧️", "Freezing rain"], 67: ["🌧️", "Freezing rain"],
+    71: ["🌨️", "Light snow"], 73: ["🌨️", "Snow"], 75: ["🌨️", "Heavy snow"], 77: ["🌨️", "Snow grains"],
+    80: ["🌦️", "Showers"], 81: ["🌧️", "Showers"], 82: ["⛈️", "Violent showers"],
+    85: ["🌨️", "Snow showers"], 86: ["🌨️", "Snow showers"],
+    95: ["⛈️", "Thunderstorm"], 96: ["⛈️", "Thunderstorm + hail"], 99: ["⛈️", "Thunderstorm + hail"],
+  };
+  const wmo = (code) => WMO[code] || ["🌡️", ""];
+
+  // US AQI bands (0–500) → label + colour class. Returns null for missing data.
+  function aqiBand(aqi) {
+    if (aqi == null || Number.isNaN(aqi)) return null;
+    if (aqi <= 50)  return { label: "Good",                  cls: "aqi-good" };
+    if (aqi <= 100) return { label: "Moderate",              cls: "aqi-mod"  };
+    if (aqi <= 150) return { label: "Unhealthy (sensitive)", cls: "aqi-usg"  };
+    if (aqi <= 200) return { label: "Unhealthy",             cls: "aqi-unh"  };
+    if (aqi <= 300) return { label: "Very unhealthy",        cls: "aqi-vunh" };
+    return                 { label: "Hazardous",             cls: "aqi-haz"  };
+  }
+
+  // Open-Meteo returns a single object for one location, an array for many.
+  const asArray = (d) => (Array.isArray(d) ? d : [d]);
+
+  let wxToken = 0; // guards against a stale fetch painting over a newer render
+  async function loadWeather(rows) {
+    const myToken = ++wxToken;
+    const pts = rows.map((r) => byCode[r.dest]).filter((a) => a && a.lat != null);
+    if (!pts.length) return;
+    const lat = pts.map((a) => a.lat).join(",");
+    const lon = pts.map((a) => a.lon).join(",");
+    const W = "https://api.open-meteo.com/v1/forecast";
+    const A = "https://air-quality-api.open-meteo.com/v1/air-quality";
+    try {
+      const [wRes, aRes] = await Promise.all([
+        fetch(`${W}?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code&timezone=auto`),
+        fetch(`${A}?latitude=${lat}&longitude=${lon}&current=us_aqi&timezone=auto`),
+      ]);
+      if (!wRes.ok || !aRes.ok) throw new Error("weather fetch failed");
+      const wArr = asArray(await wRes.json());
+      const aArr = asArray(await aRes.json());
+      if (myToken !== wxToken) return; // a newer renderCards already ran
+      pts.forEach((a, i) => {
+        const slot = $("cards").querySelector(`[data-wx="${a.iata}"]`);
+        if (!slot) return;
+        const temp = wArr[i]?.current?.temperature_2m;
+        const code = wArr[i]?.current?.weather_code;
+        const aqiRaw = aArr[i]?.current?.us_aqi;
+        const aqi = aqiRaw == null ? null : Math.round(aqiRaw);
+        const band = aqiBand(aqi);
+        const [icon, desc] = wmo(code);
+        const wx = temp != null
+          ? `<span class="wx-temp" title="${desc}">${icon} ${Math.round(temp)}°C</span>` : "";
+        const air = band
+          ? `<span class="aqi ${band.cls}" title="US AQI ${aqi} · ${desc}">AQI ${aqi} · ${band.label}</span>` : "";
+        slot.innerHTML = wx + air || '<span class="wx-load">Weather unavailable</span>';
+      });
+    } catch (e) {
+      if (myToken !== wxToken) return;
+      pts.forEach((a) => {
+        const slot = $("cards").querySelector(`[data-wx="${a.iata}"]`);
+        if (slot) slot.innerHTML = '<span class="wx-load">Weather unavailable</span>';
+      });
+    }
   }
 
   // ===================== WATCHLIST =====================

@@ -150,6 +150,32 @@
     .card .badge { position: absolute; top: 16px; right: 16px; font-size: 11px; font-weight: 700;
       color: #fff; background: linear-gradient(120deg, var(--accent), var(--accent-2));
       padding: 5px 11px; border-radius: 980px; letter-spacing: .02em; box-shadow: 0 4px 12px var(--glow-2); }
+
+    /* ---- weather + air quality (per-destination footer) ---- */
+    .card .wx { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hairline); min-height: 26px; }
+    .wx-temp { font-size: 13px; font-weight: 600; color: var(--text-2); }
+    .wx-load { font-size: 12px; color: var(--text-3); }
+    .aqi { font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: 980px; letter-spacing: .01em; }
+    /* AQI band colours (US AQI). color-mix keeps them legible on light & dark cards. */
+    .aqi-good { color: #1d8a4e; background: color-mix(in srgb, #1d8a4e 16%, transparent); }
+    .aqi-mod  { color: #b88600; background: color-mix(in srgb, #e0a800 20%, transparent); }
+    .aqi-usg  { color: #d2691e; background: color-mix(in srgb, #ff7a1a 18%, transparent); }
+    .aqi-unh  { color: #c1121f; background: color-mix(in srgb, #c1121f 16%, transparent); }
+    .aqi-vunh { color: #8e2de0; background: color-mix(in srgb, #8e2de0 18%, transparent); }
+    .aqi-haz  { color: #fff;    background: #7d1128; }
+    :root[data-theme="dark"] .aqi-good { color: #30d158; }
+    :root[data-theme="dark"] .aqi-mod  { color: #ffd60a; }
+    :root[data-theme="dark"] .aqi-usg  { color: #ff9f0a; }
+    :root[data-theme="dark"] .aqi-unh  { color: #ff453a; }
+    :root[data-theme="dark"] .aqi-vunh { color: #bf5af2; }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) .aqi-good { color: #30d158; }
+      :root:not([data-theme="light"]) .aqi-mod  { color: #ffd60a; }
+      :root:not([data-theme="light"]) .aqi-usg  { color: #ff9f0a; }
+      :root:not([data-theme="light"]) .aqi-unh  { color: #ff453a; }
+      :root:not([data-theme="light"]) .aqi-vunh { color: #bf5af2; }
+    }
     @keyframes rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
 
     /* ---- empty / skeleton ---- */
