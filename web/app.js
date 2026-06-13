@@ -45,10 +45,10 @@
   let activeMonth = 8;
 
   async function loadDashboard() {
-    // Fetch round-trip ("cheapest") AND one-way ("outbound") fares, so a route
-    // with no complete round trip can still show its cheapest one-way.
+    // Fetch cached round trips ("cheapest"), live-confirmed round trips ("live"),
+    // and one-way legs ("outbound") so every route shows the best price we have.
     const { data, error } = await db.from("latest").select("dest,depart,price,captured_at,fare_type")
-      .in("fare_type", ["cheapest", "outbound"]);
+      .in("fare_type", ["cheapest", "live", "outbound"]);
     if (error) { showBanner("Could not read prices: " + error.message); return; }
     priceRows = (data || []).filter((r) => r.price != null);
 
@@ -62,33 +62,34 @@
     renderCards();
   }
 
-  // Cheapest round trip per dest; if none, cheapest one-way (tagged). Round trips
-  // are listed first so the "Best deal" badge always lands on a true round trip.
+  // Best price per dest: cached round trip → live round trip → cached one-way.
+  // Round-trip-equivalent fares lead so the "Best deal" badge lands on a real round trip.
   function bestPerDest(month) {
     const mm = String(month).padStart(2, "0");
-    const rt = {}, ow = {};
+    const rt = {}, live = {}, ow = {};
     for (const r of priceRows) {
       if (r.depart.slice(5, 7) !== mm) continue;
-      const bucket = r.fare_type === "cheapest" ? rt : ow;
-      if (!bucket[r.dest] || r.price < bucket[r.dest].price) bucket[r.dest] = r;
+      const b = r.fare_type === "cheapest" ? rt : r.fare_type === "live" ? live : ow;
+      if (!b[r.dest] || r.price < b[r.dest].price) b[r.dest] = r;
     }
     const out = [];
-    for (const dest of new Set([...Object.keys(rt), ...Object.keys(ow)])) {
-      out.push(rt[dest] ? { dest, ...rt[dest], kind: "round trip" }
-                        : { dest, ...ow[dest], kind: "one-way" });
+    for (const dest of new Set([...Object.keys(rt), ...Object.keys(live), ...Object.keys(ow)])) {
+      if (rt[dest]) out.push({ dest, ...rt[dest], kind: "round trip" });
+      else if (live[dest]) out.push({ dest, ...live[dest], kind: "live" });
+      else out.push({ dest, ...ow[dest], kind: "one-way" });
     }
-    return out.sort((a, b) =>
-      a.kind !== b.kind ? (a.kind === "round trip" ? -1 : 1) : a.price - b.price);
+    const rank = { "round trip": 0, live: 0, "one-way": 1 };
+    return out.sort((a, b) => rank[a.kind] !== rank[b.kind] ? rank[a.kind] - rank[b.kind] : a.price - b.price);
   }
 
   function renderStats() {
     const el = $("stats");
     if (!priceRows.length) { el.innerHTML = ""; return; }
-    // Prefer the cheapest round trip for the headline; fall back to one-way.
-    const rt = priceRows.filter((r) => r.fare_type === "cheapest");
-    const pool = rt.length ? rt : priceRows;
+    // Prefer round-trip totals (cached or live) for the headline; fall back to one-way.
+    const roundish = priceRows.filter((r) => r.fare_type === "cheapest" || r.fare_type === "live");
+    const pool = roundish.length ? roundish : priceRows;
     const cheapest = pool.reduce((m, r) => (r.price < m.price ? r : m));
-    const kind = rt.length ? "round trip" : "one-way";
+    const kind = !roundish.length ? "one-way" : cheapest.fare_type === "live" ? "live round trip" : "round trip";
     const city = byCode[cheapest.dest]?.city || cheapest.dest;
     const routes = new Set(priceRows.map((r) => r.dest)).size;
     el.innerHTML = `
@@ -125,7 +126,8 @@
     el.innerHTML = rows.map((r, i) => {
       const a = byCode[r.dest];
       const d = new Date(r.depart).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
-      const tag = `<span class="kind ${r.kind === "one-way" ? "ow" : ""}">${r.kind}</span>`;
+      const cls = r.kind === "one-way" ? "ow" : r.kind === "live" ? "live" : "";
+      const tag = `<span class="kind ${cls}">${r.kind}</span>`;
       return `<div class="card" style="animation-delay:${i * 45}ms">
         ${i === 0 && r.kind === "round trip" ? '<span class="badge">Best deal</span>' : ""}
         <div><span class="city">${a ? a.city : r.dest}</span><span class="code">${r.dest}</span></div>

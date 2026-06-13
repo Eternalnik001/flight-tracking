@@ -31,9 +31,10 @@ daily would blow any free tier in hours. The trick is a **two-tier scan**:
    route per leg returns a whole month of cheapest one-way fares. Round trips are assembled as "split"
    fares (outbound + return leg). All routes run concurrently — a full scan takes seconds.
 2. **Diff.** Each run is compared against the previous snapshot in Postgres.
-3. **Live confirmation — gated.** Only date/route combos whose cached price **dropped ≥ `DROP_PCT_TRIGGER`**
-   (or fell below an absolute target) are confirmed live against **SerpApi Google Flights**, hard-capped at
-   `MAX_LIVE_CALLS` per run to stay inside the free tier.
+3. **Live confirmation + backfill — gated.** Date/route combos whose cached price **dropped ≥
+   `DROP_PCT_TRIGGER`** are confirmed live against **SerpApi Google Flights**. Then any route/month the free
+   cache leaves **empty** gets one live round-trip price (a mid-month sample), refreshed only when stale
+   (`LIVE_STALE_DAYS`) so the budget isn't re-spent daily. All live calls share the `MAX_LIVE_CALLS` cap.
 4. **Surface it.** Prices land in Supabase → the live dashboard reads them directly, and a static HTML
    matrix (`report.html`) is saved as a downloadable CI artifact.
 
@@ -154,8 +155,9 @@ python -m tracker.main # writes report.html and updates the DB
 
 ## Known limits (deliberate scope)
 
-- **Far-future months are empty until ~2–3 months out.** The Aviasales cache is populated by real user
-  searches, so November shows little this far ahead — by design, not a bug. August already has data.
+- **Thin routes / far-future months are sparse in the free cache.** The Aviasales cache is populated by
+  real searches, so it shows little this far ahead — but the **live backfill** fills one real round-trip
+  price per empty route/month (within the `MAX_LIVE_CALLS` budget), so the dashboard isn't blank.
 - **Single shared watchlist, no login.** Fine for a personal tool; the anon key can edit the watchlist.
   Add Supabase Auth if it goes multi-user.
 - **Cron is best-effort.** GitHub may delay scheduled runs under load.

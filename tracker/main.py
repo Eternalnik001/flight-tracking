@@ -33,6 +33,47 @@ async def scan_cached(dests: list[str], months: list[int]) -> list[tuple[str, di
         return await asyncio.gather(*(for_dest(d) for d in dests), return_exceptions=True)
 
 
+def _backfill_empty_routes(serp, matrices, out: list, budget: int) -> int:
+    """Live-fetch one round-trip price for each (dest, month) the cache left empty.
+
+    Skips route-months that already have a *fresh* live price (< LIVE_STALE_DAYS old)
+    so the budget isn't re-spent daily. Appends (dest, depart_iso, price) to `out`.
+    Returns the number of live calls spent.
+    """
+    if budget <= 0:
+        return 0
+    ages = storage.load_live_ages()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    todo: list[tuple[str, str, str]] = []
+    for dest, rows in matrices.items():
+        for m in config.TRIP_MONTHS:
+            mm = f"{m:02d}"
+            if any(r["best_price"] is not None and r["depart"][5:7] == mm for r in rows):
+                continue  # cache already has a round trip this month
+            dep, ret = config.sample_combo(m)
+            dep_iso, ret_iso = dep.isoformat(), ret.isoformat()
+            age = ages.get((dest, dep_iso))
+            if age is not None and (now - age.replace(tzinfo=None)).days < config.LIVE_STALE_DAYS:
+                continue  # fresh live price already stored
+            todo.append((dest, dep_iso, ret_iso))
+
+    spent = 0
+    for dest, dep_iso, ret_iso in todo:
+        if spent >= budget:
+            print(f"[backfill] budget reached — {len(todo) - spent} route-month(s) deferred to a later run")
+            break
+        try:
+            res = serp.price(config.ORIGIN, dest, dep_iso, ret_iso)
+            if res.get("price") is not None:
+                out.append((dest, dep_iso, float(res["price"])))
+            spent += 1
+        except Exception as exc:  # noqa: BLE001 - one bad call shouldn't kill the run
+            security.safe_print(f"[backfill] {dest} {dep_iso} failed: {exc!r}")
+    if out:
+        print(f"[backfill] filled {len(out)} empty route-month(s) with live prices")
+    return spent
+
+
 def main() -> None:
     security.require_secrets("TRAVELPAYOUTS_TOKEN")  # core scan can't run without it
     storage.init_db()
@@ -64,11 +105,15 @@ def main() -> None:
             dest, rows, config.DROP_PCT_TRIGGER, config.ABS_TARGET.get(dest)
         )
 
-    # Gated live confirmation: biggest drops first, capped to protect the SerpApi free tier.
+    # Live SerpApi calls (capped by MAX_LIVE_CALLS to protect the free tier):
+    #   1) confirm the biggest cached price drops, then
+    #   2) backfill routes/months the free cache left empty, so they aren't blank.
     candidates.sort(key=lambda c: c[0])
     live_done = 0
+    backfill: list[tuple[str, str, float]] = []
     if config.SERPAPI_KEY:
         serp = clients.SerpApi(config.SERPAPI_KEY, config.CURRENCY.upper())
+
         for _score, dest, row in candidates:
             if live_done >= config.MAX_LIVE_CALLS:
                 break
@@ -78,7 +123,10 @@ def main() -> None:
             except Exception as exc:  # noqa: BLE001 - one bad live call shouldn't kill the run
                 security.safe_print(f"[live] {dest} {row['depart']} failed: {exc!r}")
 
+        live_done += _backfill_empty_routes(serp, matrices, backfill, budget=config.MAX_LIVE_CALLS - live_done)
+
     storage.save_snapshot(all_points)
+    storage.save_live(backfill)
 
     run_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     html = report.render(matrices, run_at, live_done, len(candidates))

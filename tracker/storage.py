@@ -118,7 +118,11 @@ def seed_watchlist_if_fresh(origin: str, dests: list[str]) -> None:
 
 
 def save_snapshot(points: dict[tuple[str, str, str], float]) -> None:
-    """Replace `latest` with this run, and append everything to `history`."""
+    """Replace the cached part of `latest` with this run, append to `history`.
+
+    `live` rows (from the live backfill) are preserved — they persist across runs
+    and are refreshed on their own staleness schedule, not wiped every scan.
+    """
     now = datetime.now(timezone.utc)
     latest_rows = [
         {"dest": d, "depart": dep, "fare_type": ft, "price": p, "captured_at": now}
@@ -129,8 +133,36 @@ def save_snapshot(points: dict[tuple[str, str, str], float]) -> None:
         for (d, dep, ft), p in points.items()
     ]
     with ENGINE.begin() as conn:
-        conn.execute(delete(latest))
+        conn.execute(delete(latest).where(latest.c.fare_type != "live"))
         if latest_rows:
             conn.execute(insert(latest), latest_rows)
         if history_rows:
             conn.execute(insert(history), history_rows)
+
+
+def load_live_ages() -> dict[tuple[str, str], datetime]:
+    """{(dest, depart): captured_at} for stored live prices — used for staleness."""
+    with ENGINE.connect() as conn:
+        rows = conn.execute(
+            select(latest.c.dest, latest.c.depart, latest.c.captured_at)
+            .where(latest.c.fare_type == "live")
+        )
+        return {(r.dest, r.depart): r.captured_at for r in rows}
+
+
+def save_live(items: list[tuple[str, str, float]]) -> None:
+    """Upsert live round-trip prices (dest, depart, price) into `latest` + log to `history`."""
+    if not items:
+        return
+    now = datetime.now(timezone.utc)
+    with ENGINE.begin() as conn:
+        for dest, depart, price in items:
+            conn.execute(
+                delete(latest).where(
+                    latest.c.dest == dest, latest.c.depart == depart, latest.c.fare_type == "live"
+                )
+            )
+            conn.execute(insert(latest), {"dest": dest, "depart": depart, "fare_type": "live",
+                                          "price": price, "captured_at": now})
+            conn.execute(insert(history), {"dest": dest, "depart": depart, "fare_type": "live",
+                                           "price": price, "run_at": now})

@@ -53,6 +53,9 @@ ABS_TARGET: dict[str, float] = {  # OR if cached cheapest falls at/below an abso
     # "BOM": 4500,
 }
 MAX_LIVE_CALLS = int(os.getenv("MAX_LIVE_CALLS", "8"))  # hard cap per run -> stays inside SerpApi free tier
+# Live backfill: routes/months the free cache leaves empty get one real live price.
+# Refreshed only when older than this many days, so we don't re-spend the budget daily.
+LIVE_STALE_DAYS = int(os.getenv("LIVE_STALE_DAYS", "3"))
 
 # ---------------------------------------------------------------------------
 # Concurrency / politeness for the cached scan
@@ -92,3 +95,9 @@ def trip_combos(month: int) -> list[tuple[date, date]]:
 def trip_month_str(month: int) -> str:
     """YYYY-MM string the calendar endpoint expects."""
     return f"{TRIP_YEAR}-{month:02d}"
+
+
+def sample_combo(month: int) -> tuple[date, date]:
+    """A representative mid-month (depart, return) for a single live price probe."""
+    combos = trip_combos(month)
+    return combos[len(combos) // 2]
