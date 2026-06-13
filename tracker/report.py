@@ -3,9 +3,19 @@ and local preview). Old-school tables + inline styles so it renders anywhere.
 """
 from __future__ import annotations
 
+import calendar
+
 from jinja2 import Template
 
 from . import config
+
+
+def _months_label() -> str:
+    """Human-readable list of the tracked months, e.g. "August & November"."""
+    names = [calendar.month_name[m] for m in config.TRIP_MONTHS]
+    if len(names) <= 1:
+        return names[0] if names else ""
+    return " & ".join([", ".join(names[:-1]), names[-1]]) if len(names) > 2 else " & ".join(names)
 
 
 def rupees(value: float | None) -> str:
@@ -25,7 +35,7 @@ def _arrow(delta: float | None, delta_pct: float | None) -> str:
 _TEMPLATE = Template(
     """
 <div style="font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;max-width:880px;margin:0 auto;">
-  <h2 style="margin:0 0 4px;">{{ origin }} &rarr; domestic &mdash; November price matrix</h2>
+  <h2 style="margin:0 0 4px;">{{ origin }} &rarr; domestic &mdash; {{ months_label }} price matrix</h2>
   <p style="margin:0 0 16px;color:#666;font-size:13px;">
     Generated {{ run_at }} &middot; {{ nights }}-night stays &middot; cached scan with
     {{ live_done }} live confirmation{{ '' if live_done == 1 else 's' }}
@@ -121,6 +131,7 @@ def render(matrices: dict[str, list[dict]], run_at: str, live_done: int, candida
 
     return _TEMPLATE.render(
         origin=config.ORIGIN,
+        months_label=_months_label(),
         nights=config.NIGHTS,
         run_at=run_at,
         live_done=live_done,

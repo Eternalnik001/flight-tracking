@@ -1,4 +1,4 @@
-// Drives the Apple-style frontend: hero stats, month-segmented destination
+// Drives the frontend: theme toggle, hero stats, month-segmented destination
 // cards, and the watchlist editor. Talks straight to Supabase via the anon key;
 // the Python job (DB owner) bypasses RLS. Page is constrained by supabase_setup.sql.
 (function () {
@@ -7,7 +7,33 @@
   const byCode = Object.fromEntries(window.AIRPORTS.map((a) => [a.iata, a]));
   const $ = (id) => document.getElementById(id);
   const rupee = (n) => "₹" + Math.round(n).toLocaleString("en-IN");
-  const MONTHS = { 8: "August", 11: "November" };
+  // Month number -> name, derived (no hardcoded month list anywhere).
+  const monthName = (m) => new Date(2000, m - 1, 1).toLocaleString("en", { month: "long" });
+
+  // ---- theme toggle (persisted; defaults to the OS preference) ----
+  const THEME_KEY = "ft_theme";
+  const SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
+  const MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>';
+  const themeBtn = $("theme-toggle");
+  const effectiveTheme = () =>
+    document.documentElement.dataset.theme ||
+    (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  function paintThemeBtn() {
+    const dark = effectiveTheme() === "dark";
+    themeBtn.innerHTML = dark ? SUN : MOON; // show the icon you'll switch TO
+    themeBtn.setAttribute("aria-label", dark ? "Switch to light mode" : "Switch to dark mode");
+  }
+  themeBtn.onclick = () => {
+    const next = effectiveTheme() === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem(THEME_KEY, next); } catch (e) {}
+    paintThemeBtn();
+  };
+  // Track OS changes only while the user hasn't pinned a preference.
+  matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => {
+    if (!document.documentElement.dataset.theme) paintThemeBtn();
+  });
+  paintThemeBtn();
 
   // ---- toast / banner ----
   let toastT;
@@ -41,20 +67,24 @@
   const db = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
 
   // ===================== DASHBOARD =====================
-  let priceRows = [];   // cheapest rows across all months
-  let activeMonth = 8;
+  let priceRows = [];     // cheapest / live / outbound rows across all months
+  let months = [];        // tracked months present in the data (ascending)
+  let activeMonth = null;
+
+  // Show a shimmer while the first fetch is in flight.
+  $("cards").innerHTML = Array.from({ length: 6 }, () => '<div class="skeleton"></div>').join("");
 
   async function loadDashboard() {
     // Fetch cached round trips ("cheapest"), live-confirmed round trips ("live"),
     // and one-way legs ("outbound") so every route shows the best price we have.
     const { data, error } = await db.from("latest").select("dest,depart,price,captured_at,fare_type")
       .in("fare_type", ["cheapest", "live", "outbound"]);
-    if (error) { showBanner("Could not read prices: " + error.message); return; }
+    if (error) { showBanner("Could not read prices: " + error.message); $("cards").innerHTML = ""; return; }
     priceRows = (data || []).filter((r) => r.price != null);
 
-    // default to whichever tracked month actually has data
-    const has = (m) => priceRows.some((r) => +r.depart.slice(5, 7) === m);
-    activeMonth = has(8) ? 8 : has(11) ? 11 : 8;
+    // Derive the tracked months straight from the data — no hardcoded list.
+    months = [...new Set(priceRows.map((r) => +r.depart.slice(5, 7)))].sort((a, b) => a - b);
+    activeMonth = months[0] ?? null;
 
     renderStats();
     renderUpdated();
@@ -95,11 +125,13 @@
     el.innerHTML = `
       <div class="stat"><div class="k">Cheapest right now</div>
         <div class="v">${rupee(cheapest.price)}</div>
-        <div class="meta" style="font-size:13px;color:var(--text-2)">to ${city} · ${kind}</div></div>
+        <div class="meta">to ${city} · ${kind}</div></div>
       <div class="stat"><div class="k">Routes with prices</div>
-        <div class="v">${routes}</div></div>
+        <div class="v">${routes}</div>
+        <div class="meta">across ${months.length} month${months.length === 1 ? "" : "s"}</div></div>
       <div class="stat"><div class="k">Cost to run</div>
-        <div class="v">₹0 <small>/ forever</small></div></div>`;
+        <div class="v">₹0 <small>/ forever</small></div>
+        <div class="meta">free APIs + GitHub Actions</div></div>`;
   }
 
   function renderUpdated() {
@@ -108,18 +140,27 @@
   }
 
   function setupSegments() {
-    $("seg").querySelectorAll(".seg-btn").forEach((b) => {
-      b.classList.toggle("active", +b.dataset.month === activeMonth);
+    const seg = $("seg");
+    seg.innerHTML = months
+      .map((m) => `<button class="seg-btn${m === activeMonth ? " active" : ""}" data-month="${m}">${monthName(m)}</button>`)
+      .join("");
+    seg.querySelectorAll(".seg-btn").forEach((b) => {
       b.onclick = () => { activeMonth = +b.dataset.month; setupSegments(); renderCards(); };
     });
   }
 
   function renderCards() {
     const el = $("cards");
+    if (activeMonth == null) {
+      el.innerHTML = `<div class="empty" style="grid-column:1/-1">
+        <b>No fares yet.</b><br>The free cache only holds fares a few months ahead, so they appear
+        closer to travel. The daily job keeps checking — pick destinations below to start tracking.</div>`;
+      return;
+    }
     const rows = bestPerDest(activeMonth);
     if (!rows.length) {
       el.innerHTML = `<div class="empty" style="grid-column:1/-1">
-        <b>No ${MONTHS[activeMonth]} fares yet.</b><br>The free cache only holds fares a few months
+        <b>No ${monthName(activeMonth)} fares yet.</b><br>The free cache only holds fares a few months
         ahead, so they appear closer to travel. The daily job keeps checking.</div>`;
       return;
     }
@@ -127,12 +168,13 @@
       const a = byCode[r.dest];
       const d = new Date(r.depart).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
       const cls = r.kind === "one-way" ? "ow" : r.kind === "live" ? "live" : "";
-      const tag = `<span class="kind ${cls}">${r.kind}</span>`;
+      const isBest = i === 0 && r.kind === "round trip";
       return `<div class="card" style="animation-delay:${i * 45}ms">
-        ${i === 0 && r.kind === "round trip" ? '<span class="badge">Best deal</span>' : ""}
-        <div><span class="city">${a ? a.city : r.dest}</span><span class="code">${r.dest}</span></div>
+        ${isBest ? '<span class="badge">Best deal</span>' : ""}
+        <div class="route">${ORIGIN} → ${r.dest}</div>
+        <div><span class="city">${a ? a.city : r.dest}</span><span class="code">${a ? a.state : ""}</span></div>
         <div class="price">${rupee(r.price)}</div>
-        <div class="meta">${tag} · Depart ${d}${a ? " · " + a.state : ""}</div>
+        <div class="meta"><span class="kind ${cls}">${r.kind}</span> · Depart ${d}</div>
       </div>`;
     }).join("");
   }

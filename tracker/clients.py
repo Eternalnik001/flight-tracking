@@ -5,12 +5,58 @@
 """
 from __future__ import annotations
 
+import asyncio
+import time
+
 import certifi
 import httpx
 
 # certifi CA bundle: makes TLS verification work on machines (e.g. macOS Python)
 # whose default trust store httpx can't find. Harmless on Linux CI.
 CA_BUNDLE = certifi.where()
+
+# ---------------------------------------------------------------------------
+# Retry policy — both upstreams are flaky enough that a single transient error
+# (a dropped connection, a 429/5xx) shouldn't drop a whole route for the day.
+# ---------------------------------------------------------------------------
+MAX_RETRIES = 3          # total attempts
+BACKOFF_BASE = 1.0       # seconds; doubles each retry (1s, 2s, ...)
+_RETRY_STATUS = {429, 500, 502, 503, 504}
+
+
+def _is_retriable(exc: Exception) -> bool:
+    """Transient network errors and a few retriable HTTP statuses."""
+    if isinstance(exc, httpx.TransportError):  # timeouts, conn resets, DNS, ...
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code in _RETRY_STATUS
+    return False
+
+
+async def _aretry(fn):
+    """Await `fn()` with exponential backoff on transient failures."""
+    delay = BACKOFF_BASE
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            return await fn()
+        except Exception as exc:  # noqa: BLE001 - re-raised below unless retriable
+            if attempt == MAX_RETRIES or not _is_retriable(exc):
+                raise
+            await asyncio.sleep(delay)
+            delay *= 2
+
+
+def _retry(fn):
+    """Call `fn()` with exponential backoff on transient failures (sync)."""
+    delay = BACKOFF_BASE
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            return fn()
+        except Exception as exc:  # noqa: BLE001 - re-raised below unless retriable
+            if attempt == MAX_RETRIES or not _is_retriable(exc):
+                raise
+            time.sleep(delay)
+            delay *= 2
 
 # ---------------------------------------------------------------------------
 # Travelpayouts – cached "month matrix" (one call returns a whole month)
@@ -51,9 +97,12 @@ class Travelpayouts:
             "one_way": "true",
             "token": self.token,
         }
-        resp = await client.get(TP_MONTH_MATRIX_URL, params=params, timeout=self.timeout)
-        resp.raise_for_status()
-        payload = resp.json()
+        async def _do() -> dict:
+            resp = await client.get(TP_MONTH_MATRIX_URL, params=params, timeout=self.timeout)
+            resp.raise_for_status()
+            return resp.json()
+
+        payload = await _aretry(_do)
 
         out: dict[str, float] = {}
         for rec in payload.get("data") or []:
@@ -108,9 +157,12 @@ class SerpApi:
         else:
             params["type"] = 2            # one way
 
-        resp = httpx.get(SERPAPI_URL, params=params, timeout=timeout, verify=CA_BUNDLE)
-        resp.raise_for_status()
-        data = resp.json()
+        def _do() -> dict:
+            resp = httpx.get(SERPAPI_URL, params=params, timeout=timeout, verify=CA_BUNDLE)
+            resp.raise_for_status()
+            return resp.json()
+
+        data = _retry(_do)
 
         prices: list[float] = []
         for key in ("best_flights", "other_flights"):

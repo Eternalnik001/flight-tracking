@@ -64,6 +64,12 @@ MAX_CONCURRENCY = int(os.getenv("MAX_CONCURRENCY", "6"))
 REQUEST_TIMEOUT = 30  # seconds
 
 # ---------------------------------------------------------------------------
+# History retention: the append-only log grows with every run. Keep a rolling
+# window so the table (and future trend queries) stay small. 0 disables pruning.
+# ---------------------------------------------------------------------------
+HISTORY_RETENTION_DAYS = int(os.getenv("HISTORY_RETENTION_DAYS", "180"))
+
+# ---------------------------------------------------------------------------
 # Secrets (set as GitHub Actions secrets / local env vars)
 # ---------------------------------------------------------------------------
 TRAVELPAYOUTS_TOKEN = os.getenv("TRAVELPAYOUTS_TOKEN", "")

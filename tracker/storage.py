@@ -9,13 +9,14 @@ GitHub Actions runs). SQLite is fine for local testing.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
     Float,
+    Index,
     MetaData,
     String,
     Table,
@@ -47,6 +48,10 @@ history = Table(
     Column("fare_type", String),
     Column("price", Float),
     Column("run_at", DateTime),
+    # Trend lookups are always "this route/day over time"; index it so they stay
+    # fast as the log grows. run_at supports the retention prune.
+    Index("ix_history_dest_depart", "dest", "depart"),
+    Index("ix_history_run_at", "run_at"),
 )
 
 # Routes the daily job should scan. The frontend writes here; the job reads it.
@@ -166,3 +171,17 @@ def save_live(items: list[tuple[str, str, float]]) -> None:
                                           "price": price, "captured_at": now})
             conn.execute(insert(history), {"dest": dest, "depart": depart, "fare_type": "live",
                                            "price": price, "run_at": now})
+
+
+def prune_history(retention_days: int) -> int:
+    """Delete history rows older than `retention_days`. Returns rows removed.
+
+    `latest` is never touched — it's a single replaced snapshot. 0/negative
+    retention disables pruning (keep everything).
+    """
+    if retention_days <= 0:
+        return 0
+    cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+    with ENGINE.begin() as conn:
+        result = conn.execute(delete(history).where(history.c.run_at < cutoff))
+        return result.rowcount or 0

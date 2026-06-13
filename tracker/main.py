@@ -33,6 +33,20 @@ async def scan_cached(dests: list[str], months: list[int]) -> list[tuple[str, di
         return await asyncio.gather(*(for_dest(d) for d in dests), return_exceptions=True)
 
 
+def _dedupe_live(items: list[tuple[str, str, float]]) -> list[tuple[str, str, float]]:
+    """Collapse duplicate (dest, depart) live prices, keeping the cheapest.
+
+    A candidate confirmation and a backfill could in principle target the same
+    route-day; `latest` is keyed on (dest, depart, 'live'), so we must not hand
+    `save_live` two rows for the same key.
+    """
+    best: dict[tuple[str, str], float] = {}
+    for dest, depart, price in items:
+        if (dest, depart) not in best or price < best[(dest, depart)]:
+            best[(dest, depart)] = price
+    return [(dest, depart, price) for (dest, depart), price in best.items()]
+
+
 def _backfill_empty_routes(serp, matrices, out: list, budget: int) -> int:
     """Live-fetch one round-trip price for each (dest, month) the cache left empty.
 
@@ -57,7 +71,7 @@ def _backfill_empty_routes(serp, matrices, out: list, budget: int) -> int:
                 continue  # fresh live price already stored
             todo.append((dest, dep_iso, ret_iso))
 
-    spent = 0
+    spent = filled = 0
     for dest, dep_iso, ret_iso in todo:
         if spent >= budget:
             print(f"[backfill] budget reached — {len(todo) - spent} route-month(s) deferred to a later run")
@@ -66,11 +80,12 @@ def _backfill_empty_routes(serp, matrices, out: list, budget: int) -> int:
             res = serp.price(config.ORIGIN, dest, dep_iso, ret_iso)
             if res.get("price") is not None:
                 out.append((dest, dep_iso, float(res["price"])))
+                filled += 1
             spent += 1
         except Exception as exc:  # noqa: BLE001 - one bad call shouldn't kill the run
             security.safe_print(f"[backfill] {dest} {dep_iso} failed: {exc!r}")
-    if out:
-        print(f"[backfill] filled {len(out)} empty route-month(s) with live prices")
+    if filled:
+        print(f"[backfill] filled {filled} empty route-month(s) with live prices")
     return spent
 
 
@@ -110,7 +125,10 @@ def main() -> None:
     #   2) backfill routes/months the free cache left empty, so they aren't blank.
     candidates.sort(key=lambda c: c[0])
     live_done = 0
-    backfill: list[tuple[str, str, float]] = []
+    # Live round-trip prices to persist (dest, depart_iso, price). Both the gated
+    # candidate confirmations AND the empty-route backfill land here, so the
+    # dashboard sees every live price we paid for — not just the backfill.
+    live_results: list[tuple[str, str, float]] = []
     if config.SERPAPI_KEY:
         serp = clients.SerpApi(config.SERPAPI_KEY, config.CURRENCY.upper())
 
@@ -120,13 +138,21 @@ def main() -> None:
             try:
                 row["live"] = serp.price(config.ORIGIN, dest, row["depart"], row["return"])
                 live_done += 1
+                price = (row["live"] or {}).get("price")
+                if price is not None:
+                    live_results.append((dest, row["depart"], float(price)))
             except Exception as exc:  # noqa: BLE001 - one bad live call shouldn't kill the run
                 security.safe_print(f"[live] {dest} {row['depart']} failed: {exc!r}")
 
-        live_done += _backfill_empty_routes(serp, matrices, backfill, budget=config.MAX_LIVE_CALLS - live_done)
+        live_done += _backfill_empty_routes(
+            serp, matrices, live_results, budget=config.MAX_LIVE_CALLS - live_done
+        )
 
     storage.save_snapshot(all_points)
-    storage.save_live(backfill)
+    storage.save_live(_dedupe_live(live_results))
+    pruned = storage.prune_history(config.HISTORY_RETENTION_DAYS)
+    if pruned:
+        print(f"[prune] removed {pruned} history row(s) older than {config.HISTORY_RETENTION_DAYS}d")
 
     run_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     html = report.render(matrices, run_at, live_done, len(candidates))
