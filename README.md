@@ -2,7 +2,7 @@
 
 **A zero-cost, fully-automated fare tracker for one-way + round-trip flights out of Bengaluru (BLR).**
 Pick destinations, and every morning it scans the cheapest 3-night / 4-day round trips across a whole
-month, stores the history, flags real price drops, and surfaces it all on a live dashboard + email.
+month, stores the history, flags real price drops, and surfaces it all on a live dashboard.
 
 🔗 **Live:** https://eternalnik001.github.io/BLR-Domestic-flight-tracking/
 💸 **Running cost:** ₹0 (entirely on free tiers)
@@ -17,8 +17,8 @@ month, stores the history, flags real price drops, and surfaces it all on a live
 | **Who it's for** | Anyone planning domestic travel from Bengaluru who wants to book at the right price without manually checking 10 routes × 27 dates every day. |
 | **What it does** | Tracks **August + November 2026** fares for a watchlist of destinations, daily, and shows the cheapest option per route. |
 | **The insight** | A free cached API does the broad month-wide scan; a metered live API is spent *only* on confirmed price drops. Cost stays flat whether you track 5 routes or 200. |
-| **Stack** | Python · Travelpayouts · SerpApi · Supabase Postgres · Resend · GitHub Actions · static GitHub Pages frontend. |
-| **Status** | Shipped & live. Daily cron green, dashboard live, email delivering. |
+| **Stack** | Python · Travelpayouts · SerpApi · Supabase Postgres · GitHub Actions · static GitHub Pages frontend. |
+| **Status** | Shipped & live. Daily cron green, dashboard live. |
 
 ---
 
@@ -34,8 +34,8 @@ daily would blow any free tier in hours. The trick is a **two-tier scan**:
 3. **Live confirmation — gated.** Only date/route combos whose cached price **dropped ≥ `DROP_PCT_TRIGGER`**
    (or fell below an absolute target) are confirmed live against **SerpApi Google Flights**, hard-capped at
    `MAX_LIVE_CALLS` per run to stay inside the free tier.
-4. **Surface it.** Prices land in Supabase → the live dashboard reads them and an HTML matrix is emailed via
-   Resend.
+4. **Surface it.** Prices land in Supabase → the live dashboard reads them directly, and a static HTML
+   matrix (`report.html`) is saved as a downloadable CI artifact.
 
 > **Net effect:** broad coverage at the cost of a few targeted live calls per day. Adding routes or months
 > costs nothing extra on the scan side.
@@ -52,7 +52,7 @@ daily would blow any free tier in hours. The trick is a **two-tier scan**:
   (free, broad)                          │   │                      (live, capped)
                                          │   └──────────┐
                                          ▼              ▼
-                                  Supabase Postgres   Resend email
+                                  Supabase Postgres   report.html (CI artifact)
                                   (latest + history + watchlist)
                                          ▲   │
    GitHub Pages frontend  ◀──reads──────┘   │
@@ -64,7 +64,6 @@ daily would blow any free tier in hours. The trick is a **two-tier scan**:
 | Cached fares | Travelpayouts `/v2/prices/month-matrix` | Whole month per call, free |
 | Live fares | SerpApi Google Flights | Best Indian-LCC coverage (IndiGo/Air India/Akasa/SpiceJet) |
 | State | Supabase Postgres | Survives between stateless CI runs; RLS lets the frontend read directly |
-| Email | Resend | Generous free tier, simple API |
 | Compute | GitHub Actions | Free scheduled cron, no server to run |
 | Frontend | Static HTML/JS on GitHub Pages | Zero build, zero hosting cost |
 
@@ -79,6 +78,8 @@ cards with a "Best deal" badge, automatic **dark mode**, and a personalised gree
 - **Reads** prices straight from Supabase with the public **anon key** (safe to expose — it's gated by the
   row-level-security policies in [`web/supabase_setup.sql`](web/supabase_setup.sql)).
 - **Writes** the watchlist: pick routes in the UI → saved to Supabase → the next daily scan uses them.
+- **One-way fallback:** if no round trip is cached for a route, it shows the cheapest one-way instead,
+  clearly tagged — so a route is never blank just because the return leg is missing.
 - Honest empty states: a far-future month with no cached data says so rather than looking broken.
 
 ---
@@ -89,7 +90,6 @@ cards with a "Best deal" badge, automatic **dark mode**, and a personalised gree
 2. **Create free accounts** and grab keys:
    - **Travelpayouts** → Aviasales program → API token
    - **SerpApi** → API key (~250 free searches/month)
-   - **Resend** → API key (`onboarding@resend.dev` works until you verify a domain)
    - **Supabase** → new project → connection string + anon key
 3. **Add repo secrets** — *Settings → Secrets and variables → Actions*:
 
@@ -98,8 +98,6 @@ cards with a "Best deal" badge, automatic **dark mode**, and a personalised gree
    | `TRAVELPAYOUTS_TOKEN` | cached scan |
    | `SERPAPI_KEY` | live confirmation |
    | `DATABASE_URL` | **use the Supabase Session-pooler string** (IPv4) — the direct host is IPv6-only and times out on CI |
-   | `RESEND_API_KEY` | email |
-   | `EMAIL_FROM` / `EMAIL_TO` | sender needs a verified domain to reach arbitrary recipients |
    | `TRIP_YEAR` / `TRIP_MONTHS` | optional; default `2026` and `8,11` |
 4. **Wire the frontend:** run [`web/supabase_setup.sql`](web/supabase_setup.sql) once in the Supabase SQL
    Editor, paste your Project URL + anon key into [`web/config.js`](web/config.js), and set
@@ -136,7 +134,7 @@ or **Clear all**) and your choices stick; the defaults are never re-added. The a
 ```bash
 pip install -r requirements.txt
 cp .env.example .env   # then fill in your keys (.env is gitignored)
-python -m tracker.main # writes report.html, updates the DB, emails if configured
+python -m tracker.main # writes report.html and updates the DB
 ```
 
 `.env` is auto-loaded; real environment variables (CI secrets) always take precedence.
@@ -160,7 +158,6 @@ python -m tracker.main # writes report.html, updates the DB, emails if configure
   searches, so November shows little this far ahead — by design, not a bug. August already has data.
 - **Single shared watchlist, no login.** Fine for a personal tool; the anon key can edit the watchlist.
   Add Supabase Auth if it goes multi-user.
-- **Email to third parties needs a verified domain.** `onboarding@resend.dev` only sends to your own address.
 - **Cron is best-effort.** GitHub may delay scheduled runs under load.
 
 ## Roadmap

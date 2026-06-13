@@ -61,18 +61,10 @@ MAX_CONCURRENCY = int(os.getenv("MAX_CONCURRENCY", "6"))
 REQUEST_TIMEOUT = 30  # seconds
 
 # ---------------------------------------------------------------------------
-# Email
-# ---------------------------------------------------------------------------
-EMAIL_TO = [e.strip() for e in os.getenv("EMAIL_TO", "").split(",") if e.strip()]
-EMAIL_FROM = os.getenv("EMAIL_FROM", "Flight Tracker <onboarding@resend.dev>")
-EMAIL_SUBJECT_PREFIX = "BLR flight matrix"
-
-# ---------------------------------------------------------------------------
 # Secrets (set as GitHub Actions secrets / local env vars)
 # ---------------------------------------------------------------------------
 TRAVELPAYOUTS_TOKEN = os.getenv("TRAVELPAYOUTS_TOKEN", "")
 SERPAPI_KEY = os.getenv("SERPAPI_KEY", "")
-RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 
 # For GitHub Actions you MUST point this at a real Postgres (Neon/Supabase free tier),
 # because the runner's filesystem is wiped each run, so SQLite would forget yesterday's

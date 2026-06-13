@@ -45,8 +45,10 @@
   let activeMonth = 8;
 
   async function loadDashboard() {
-    const { data, error } = await db.from("latest").select("dest,depart,price,captured_at")
-      .eq("fare_type", "cheapest");
+    // Fetch round-trip ("cheapest") AND one-way ("outbound") fares, so a route
+    // with no complete round trip can still show its cheapest one-way.
+    const { data, error } = await db.from("latest").select("dest,depart,price,captured_at,fare_type")
+      .in("fare_type", ["cheapest", "outbound"]);
     if (error) { showBanner("Could not read prices: " + error.message); return; }
     priceRows = (data || []).filter((r) => r.price != null);
 
@@ -60,27 +62,39 @@
     renderCards();
   }
 
+  // Cheapest round trip per dest; if none, cheapest one-way (tagged). Round trips
+  // are listed first so the "Best deal" badge always lands on a true round trip.
   function bestPerDest(month) {
     const mm = String(month).padStart(2, "0");
-    const best = {};
+    const rt = {}, ow = {};
     for (const r of priceRows) {
       if (r.depart.slice(5, 7) !== mm) continue;
-      if (!best[r.dest] || r.price < best[r.dest].price) best[r.dest] = r;
+      const bucket = r.fare_type === "cheapest" ? rt : ow;
+      if (!bucket[r.dest] || r.price < bucket[r.dest].price) bucket[r.dest] = r;
     }
-    return Object.entries(best).map(([dest, r]) => ({ dest, ...r }))
-      .sort((a, b) => a.price - b.price);
+    const out = [];
+    for (const dest of new Set([...Object.keys(rt), ...Object.keys(ow)])) {
+      out.push(rt[dest] ? { dest, ...rt[dest], kind: "round trip" }
+                        : { dest, ...ow[dest], kind: "one-way" });
+    }
+    return out.sort((a, b) =>
+      a.kind !== b.kind ? (a.kind === "round trip" ? -1 : 1) : a.price - b.price);
   }
 
   function renderStats() {
     const el = $("stats");
     if (!priceRows.length) { el.innerHTML = ""; return; }
-    const cheapest = priceRows.reduce((m, r) => (r.price < m.price ? r : m));
+    // Prefer the cheapest round trip for the headline; fall back to one-way.
+    const rt = priceRows.filter((r) => r.fare_type === "cheapest");
+    const pool = rt.length ? rt : priceRows;
+    const cheapest = pool.reduce((m, r) => (r.price < m.price ? r : m));
+    const kind = rt.length ? "round trip" : "one-way";
     const city = byCode[cheapest.dest]?.city || cheapest.dest;
     const routes = new Set(priceRows.map((r) => r.dest)).size;
     el.innerHTML = `
       <div class="stat"><div class="k">Cheapest right now</div>
         <div class="v">${rupee(cheapest.price)}</div>
-        <div class="meta" style="font-size:13px;color:var(--text-2)">to ${city}</div></div>
+        <div class="meta" style="font-size:13px;color:var(--text-2)">to ${city} · ${kind}</div></div>
       <div class="stat"><div class="k">Routes with prices</div>
         <div class="v">${routes}</div></div>
       <div class="stat"><div class="k">Cost to run</div>
@@ -111,11 +125,12 @@
     el.innerHTML = rows.map((r, i) => {
       const a = byCode[r.dest];
       const d = new Date(r.depart).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+      const tag = `<span class="kind ${r.kind === "one-way" ? "ow" : ""}">${r.kind}</span>`;
       return `<div class="card" style="animation-delay:${i * 45}ms">
-        ${i === 0 ? '<span class="badge">Best deal</span>' : ""}
+        ${i === 0 && r.kind === "round trip" ? '<span class="badge">Best deal</span>' : ""}
         <div><span class="city">${a ? a.city : r.dest}</span><span class="code">${r.dest}</span></div>
         <div class="price">${rupee(r.price)}</div>
-        <div class="meta">Depart ${d} · ${a ? a.state : ""}</div>
+        <div class="meta">${tag} · Depart ${d}${a ? " · " + a.state : ""}</div>
       </div>`;
     }).join("");
   }

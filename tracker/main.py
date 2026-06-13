@@ -82,12 +82,8 @@ def main() -> None:
 
     run_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     html = report.render(matrices, run_at, live_done, len(candidates))
-
     with open("report.html", "w", encoding="utf-8") as fh:  # artifact / local preview
         fh.write(html)
-
-    subject = f"{config.EMAIL_SUBJECT_PREFIX} — {run_at}"
-    report.send(html, subject)
     print(f"[done] routes={len(matrices)} candidates={len(candidates)} live={live_done}")
 
 

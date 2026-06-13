@@ -14,7 +14,6 @@ import re
 SECRET_ENV_VARS = (
     "TRAVELPAYOUTS_TOKEN",
     "SERPAPI_KEY",
-    "RESEND_API_KEY",
     "DATABASE_URL",
 )
 

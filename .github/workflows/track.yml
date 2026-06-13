@@ -25,10 +25,7 @@ jobs:
         env:
           TRAVELPAYOUTS_TOKEN: ${{ secrets.TRAVELPAYOUTS_TOKEN }}
           SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
-          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          EMAIL_TO: ${{ secrets.EMAIL_TO }}
-          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
           TRIP_YEAR: "2026"
 
       - name: Upload HTML report
