@@ -1,92 +1,174 @@
-# BLR domestic flight price tracker
+# ✈️ FlightTracker — Bengaluru → domestic India
 
-Monitors one-way + round-trip fares for **Bangalore → up to 20 domestic destinations**
-across every 3-night/4-day date combination in November, picks the cheapest booking
-strategy per date, and emails an HTML matrix. Runs free on **GitHub Actions** (Python).
+**A zero-cost, fully-automated fare tracker for one-way + round-trip flights out of Bengaluru (BLR).**
+Pick destinations, and every morning it scans the cheapest 3-night / 4-day round trips across a whole
+month, stores the history, flags real price drops, and surfaces it all on a live dashboard + email.
 
-## How it works (hybrid model)
+🔗 **Live:** https://eternalnik001.github.io/flight-tracking/
+💸 **Running cost:** ₹0 (entirely on free tiers)
+⏱️ **Built end-to-end in under 5 hours** — vibe-coded with Claude Code.
 
-1. **Broad scan — free, cached.** One Travelpayouts "price calendar" call per route per
-   leg returns a whole month at once (outbound one-way, return one-way, and round-trip with
-   a 3-night stay). All routes run concurrently, so a full scan takes seconds.
-2. **Diff.** Each run is compared against the previous run stored in the database.
-3. **Live confirmation — gated.** Only date/route combos whose cached price **dropped past
-   your threshold** (or fell below an absolute target) are confirmed live against
-   **SerpApi Google Flights**, capped at `MAX_LIVE_CALLS` per run so it stays inside the
-   free tier. Cost stays flat whether you track 5 routes or 200.
-4. **Email.** A summary table (cheapest option + change per route) plus a full per-route
-   matrix, sent via Resend.
+---
 
-## Setup
+## TL;DR
 
-1. Push these files to a new GitHub repo.
-2. Create accounts and grab keys:
-   - **Travelpayouts** (cached data, free): sign up → Aviasales program → API token.
-   - **SerpApi** (live, ~100–250 free searches/month): sign up → API key.
-   - **Resend** (email, free tier): sign up → API key. Use `onboarding@resend.dev` as the
-     sender until you verify your own domain.
-   - **Neon or Supabase** (free Postgres): create a project → copy the connection string.
-3. In the repo: **Settings → Secrets and variables → Actions → New repository secret**, add:
+| | |
+|---|---|
+| **Who it's for** | Anyone planning domestic travel from Bengaluru who wants to book at the right price without manually checking 10 routes × 27 dates every day. |
+| **What it does** | Tracks **August + November 2026** fares for a watchlist of destinations, daily, and shows the cheapest option per route. |
+| **The insight** | A free cached API does the broad month-wide scan; a metered live API is spent *only* on confirmed price drops. Cost stays flat whether you track 5 routes or 200. |
+| **Stack** | Python · Travelpayouts · SerpApi · Supabase Postgres · Resend · GitHub Actions · static GitHub Pages frontend. |
+| **Status** | Shipped & live. Daily cron green, dashboard live, email delivering. |
 
-   | Secret | Example |
+---
+
+## Why it's free (the hybrid model)
+
+Live flight APIs are expensive and rate-limited; naively checking 10 routes × ~27 date combos × 2 months
+daily would blow any free tier in hours. The trick is a **two-tier scan**:
+
+1. **Broad scan — free & cached.** One [Travelpayouts](https://travelpayouts.com) `month-matrix` call per
+   route per leg returns a whole month of cheapest one-way fares. Round trips are assembled as "split"
+   fares (outbound + return leg). All routes run concurrently — a full scan takes seconds.
+2. **Diff.** Each run is compared against the previous snapshot in Postgres.
+3. **Live confirmation — gated.** Only date/route combos whose cached price **dropped ≥ `DROP_PCT_TRIGGER`**
+   (or fell below an absolute target) are confirmed live against **SerpApi Google Flights**, hard-capped at
+   `MAX_LIVE_CALLS` per run to stay inside the free tier.
+4. **Surface it.** Prices land in Supabase → the live dashboard reads them and an HTML matrix is emailed via
+   Resend.
+
+> **Net effect:** broad coverage at the cost of a few targeted live calls per day. Adding routes or months
+> costs nothing extra on the scan side.
+
+---
+
+## Architecture
+
+```
+            ┌──────────────────────────────────────────────────────────┐
+            │  GitHub Actions  ·  cron 0 1 * * * UTC (06:30 IST, daily)  │
+            │                                                            │
+  Travelpayouts ──cached month scan──▶  tracker/  ──gated drops──▶  SerpApi
+  (free, broad)                          │   │                      (live, capped)
+                                         │   └──────────┐
+                                         ▼              ▼
+                                  Supabase Postgres   Resend email
+                                  (latest + history + watchlist)
+                                         ▲   │
+   GitHub Pages frontend  ◀──reads──────┘   │
+   (Apple-style dashboard) ──edits watchlist─┘
+```
+
+| Layer | Choice | Why |
+|---|---|---|
+| Cached fares | Travelpayouts `/v2/prices/month-matrix` | Whole month per call, free |
+| Live fares | SerpApi Google Flights | Best Indian-LCC coverage (IndiGo/Air India/Akasa/SpiceJet) |
+| State | Supabase Postgres | Survives between stateless CI runs; RLS lets the frontend read directly |
+| Email | Resend | Generous free tier, simple API |
+| Compute | GitHub Actions | Free scheduled cron, no server to run |
+| Frontend | Static HTML/JS on GitHub Pages | Zero build, zero hosting cost |
+
+---
+
+## The frontend
+
+A static, dependency-light page ([`web/`](web/)) with an Apple-inspired UI: frosted nav, gradient hero
+with live stats, an Apple-style segmented control to switch **August / November**, animated destination
+cards with a "Best deal" badge, automatic **dark mode**, and a personalised greeting via `?name=` links.
+
+- **Reads** prices straight from Supabase with the public **anon key** (safe to expose — it's gated by the
+  row-level-security policies in [`web/supabase_setup.sql`](web/supabase_setup.sql)).
+- **Writes** the watchlist: pick routes in the UI → saved to Supabase → the next daily scan uses them.
+- Honest empty states: a far-future month with no cached data says so rather than looking broken.
+
+---
+
+## Deploy your own
+
+1. **Fork / clone** this repo.
+2. **Create free accounts** and grab keys:
+   - **Travelpayouts** → Aviasales program → API token
+   - **SerpApi** → API key (~250 free searches/month)
+   - **Resend** → API key (`onboarding@resend.dev` works until you verify a domain)
+   - **Supabase** → new project → connection string + anon key
+3. **Add repo secrets** — *Settings → Secrets and variables → Actions*:
+
+   | Secret | Notes |
    |---|---|
-   | `TRAVELPAYOUTS_TOKEN` | `xxxxxxxxxxxx` |
-   | `SERPAPI_KEY` | `xxxxxxxxxxxx` |
-   | `RESEND_API_KEY` | `re_xxxxxxxx` |
-   | `DATABASE_URL` | `postgresql://user:pass@host/db?sslmode=require` |
-   | `EMAIL_TO` | `you@example.com,team@example.com` |
-   | `EMAIL_FROM` | `Flight Tracker <onboarding@resend.dev>` |
+   | `TRAVELPAYOUTS_TOKEN` | cached scan |
+   | `SERPAPI_KEY` | live confirmation |
+   | `DATABASE_URL` | **use the Supabase Session-pooler string** (IPv4) — the direct host is IPv6-only and times out on CI |
+   | `RESEND_API_KEY` | email |
+   | `EMAIL_FROM` / `EMAIL_TO` | sender needs a verified domain to reach arbitrary recipients |
+   | `TRIP_YEAR` / `TRIP_MONTHS` | optional; default `2026` and `8,11` |
+4. **Wire the frontend:** run [`web/supabase_setup.sql`](web/supabase_setup.sql) once in the Supabase SQL
+   Editor, paste your Project URL + anon key into [`web/config.js`](web/config.js), and set
+   *Settings → Pages → Source = GitHub Actions*.
+5. **Done.** The daily cron in [`.github/workflows/track.yml`](.github/workflows/track.yml) runs it (or trigger
+   manually from the Actions tab); [`pages.yml`](.github/workflows/pages.yml) deploys the frontend on push.
 
-4. Edit `tracker/config.py`: set `DROP_PCT_TRIGGER`, optional `ABS_TARGET` per route, and
-   `MAX_LIVE_CALLS`. The list of destinations is seeded from `DESTINATIONS` on the first run
-   but then lives in the `watchlist` table — edit it from the frontend (below).
-5. Done. It runs daily (see the cron in `.github/workflows/track.yml`) and can be triggered
-   manually from the **Actions** tab. Even before email is configured, the run uploads
-   `report.html` as a downloadable artifact.
+> **Postgres, not SQLite, on CI.** The runner's disk is wiped each run, so SQLite would forget yesterday's
+> prices and change-detection would never fire. SQLite remains the local-testing default.
 
-## Frontend (watchlist + dashboard)
+---
 
-A static page in [`web/`](web/) lets you pick which destinations to track (origin locked to
-BLR) and shows the cheapest fare per route. It talks to Supabase directly with the **anon
-public key** — safe to expose, since [`web/supabase_setup.sql`](web/supabase_setup.sql)
-restricts it to reading prices and editing the watchlist.
+## Configure
 
-1. After the tracker's first run (so the tables exist), run `web/supabase_setup.sql` once in
-   the Supabase **SQL Editor**.
-2. In `web/config.js` paste your **Project URL** and **anon public** key
-   (Supabase → Project Settings → API).
-3. Publish: repo **Settings → Pages → Source = GitHub Actions**. The `deploy-frontend`
-   workflow serves the `web/` folder on every push. Or just open `web/index.html` locally.
+Everything lives in [`tracker/config.py`](tracker/config.py):
 
-The watchlist drives the daily job: pick routes in the UI → they're saved to Supabase → the
-next scan uses them. The dashboard reads the same `latest` table the email is built from, so
-November stays empty until the cache warms (the page says so rather than looking broken).
+| Knob | Default | Meaning |
+|---|---|---|
+| `TRIP_MONTHS` | `8, 11` | Months to track (env `TRIP_MONTHS="8,11,12"`). Each gets its own dashboard window. |
+| `NIGHTS` | `3` | Stay length → depart D, return D+3 |
+| `DROP_PCT_TRIGGER` | `0.10` | Confirm live if cached cheapest drops ≥ 10% vs last run |
+| `ABS_TARGET` | `{}` | Optional per-route absolute INR target |
+| `MAX_LIVE_CALLS` | `8` | Hard cap on live calls per run (protects free tier) |
 
-> **GitHub Actions needs Postgres, not SQLite.** The runner's disk is wiped each run, so
-> SQLite would forget yesterday's prices and change-detection would never fire. Set
-> `DATABASE_URL` to your Neon/Supabase string. (SQLite is the local-testing default.)
+**Destinations** are seeded from `DESTINATIONS` on first run, then live in the `watchlist` table — edit them
+from the dashboard, not the code. The airport picker covers **53 airports across 29 states/UTs**.
+
+---
 
 ## Run locally
 
 ```bash
 pip install -r requirements.txt
-export TRAVELPAYOUTS_TOKEN=... SERPAPI_KEY=... RESEND_API_KEY=...
-export EMAIL_TO=you@example.com EMAIL_FROM="Flight Tracker <onboarding@resend.dev>"
-# DATABASE_URL omitted -> uses local sqlite flights.db
-python -m tracker.main          # writes report.html and (if configured) sends the email
+cp .env.example .env   # then fill in your keys (.env is gitignored)
+python -m tracker.main # writes report.html, updates the DB, emails if configured
 ```
 
-## Verify / tune
+`.env` is auto-loaded; real environment variables (CI secrets) always take precedence.
 
-- **Travelpayouts endpoint.** Cached prices come from `/v2/prices/month-matrix` (the
-  `/v1/prices/calendar` path ignores the month and returns a generic blob — don't use it).
-  It only serves **one-way** records, so round trips are built as "split" fares (outbound +
-  return leg) in `tracker/analyze.py`. The cache is sparse on thin routes and only reaches a
-  few months out: **a far-future month like November returns nothing until ~Aug–Sep**, when
-  real searches start filling it. Empty routes are expected, not a bug.
-- **Round-trip vs split.** On Indian-domestic LCCs these are usually equal; the tracker
-  flags the cases where they're not.
-- **SerpApi budget.** Daily × `MAX_LIVE_CALLS=8` ≈ 240/month — at or above the free tier, so
-  keep the cap modest or move to the $25/month (1,000 searches) plan if you want more
-  live confirmations.
-- **Cron is UTC and best-effort.** `0 1 * * *` is 06:30 IST; GitHub may delay it under load.
+---
+
+## Security
+
+- **No secret leaks in logs.** [`tracker/security.py`](tracker/security.py) redacts API tokens, keys, and DB
+  passwords from all error output (the Travelpayouts token rides in a URL query string, so this matters).
+- **Fail-fast** on missing required secrets — without ever printing the value.
+- **Pre-commit secret scanner** ([`scripts/check_secrets.py`](scripts/check_secrets.py) +
+  [`.githooks/pre-commit`](.githooks/pre-commit)) blocks committing a `.env`, real keys, or a Supabase
+  *service_role* key in the frontend. Enable with `git config core.hooksPath .githooks`.
+
+---
+
+## Known limits (deliberate scope)
+
+- **Far-future months are empty until ~2–3 months out.** The Aviasales cache is populated by real user
+  searches, so November shows little this far ahead — by design, not a bug. August already has data.
+- **Single shared watchlist, no login.** Fine for a personal tool; the anon key can edit the watchlist.
+  Add Supabase Auth if it goes multi-user.
+- **Email to third parties needs a verified domain.** `onboarding@resend.dev` only sends to your own address.
+- **Cron is best-effort.** GitHub may delay scheduled runs under load.
+
+## Roadmap
+
+- Per-card price-history sparkline (the `history` table already logs every run)
+- "Biggest drops this week" section
+- Additional months / one-off date ranges
+- Optional accounts for multi-user watchlists
+
+---
+
+*Vibe-coded end-to-end in a single sub-5-hour session with Claude Code — from a flat folder of scripts to a
+live, automated, secured product.*
