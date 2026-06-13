@@ -120,31 +120,42 @@
   }
 
   // ---- dashboard ----
-  async function loadDashboard() {
-    const { data, error } = await db.from("latest").select("dest,depart,price,captured_at")
-      .eq("fare_type", "cheapest");
-    const dash = $("dash");
-    if (error) { dash.innerHTML = `<div class="empty">Could not read prices: ${error.message}</div>`; return; }
-    if (!data.length) {
-      dash.innerHTML = `<div class="empty">No prices stored yet. The free cache only holds
-        fares a few months ahead, so November fills in closer to travel (≈Aug–Sep). The daily
-        job keeps trying.</div>`;
+  // One window per month; rows are filtered by the depart date's month so August
+  // and November fares (which share the latest table) render separately.
+  function renderMonthSection(allRows, monthNum, containerId) {
+    const el = $(containerId);
+    const mm = String(monthNum).padStart(2, "0");
+    const rows = allRows.filter((r) => r.price != null && r.depart.slice(5, 7) === mm);
+    if (!rows.length) {
+      el.innerHTML = `<div class="empty">No prices stored for this month yet. The free cache
+        only holds fares a few months ahead and fills in closer to travel — the daily job keeps
+        trying.</div>`;
       return;
     }
-    // cheapest row per dest
     const best = {};
-    for (const r of data) {
-      if (r.price == null) continue;
+    for (const r of rows) {
       if (!best[r.dest] || r.price < best[r.dest].price) best[r.dest] = r;
     }
-    const rows = Object.entries(best).sort((a, b) => a[1].price - b[1].price).map(([dest, r]) => {
+    const body = Object.entries(best).sort((a, b) => a[1].price - b[1].price).map(([dest, r]) => {
       const a = byCode[dest];
       const name = a ? `${a.city} <span class="empty">(${dest})</span>` : dest;
       return `<tr><td>${name}</td><td>${r.depart}</td>
         <td class="price">₹${Math.round(r.price).toLocaleString("en-IN")}</td></tr>`;
     }).join("");
-    dash.innerHTML = `<table><tr><th>Destination</th><th>Best depart date</th>
-      <th>Cheapest round trip</th></tr>${rows}</table>`;
+    el.innerHTML = `<table><tr><th>Destination</th><th>Best depart date</th>
+      <th>Cheapest round trip</th></tr>${body}</table>`;
+  }
+
+  async function loadDashboard() {
+    const { data, error } = await db.from("latest").select("dest,depart,price,captured_at")
+      .eq("fare_type", "cheapest");
+    if (error) {
+      const msg = `<div class="empty">Could not read prices: ${error.message}</div>`;
+      $("dash-nov").innerHTML = msg; $("dash-aug").innerHTML = msg;
+      return;
+    }
+    renderMonthSection(data, 11, "dash-nov");
+    renderMonthSection(data, 8, "dash-aug");
     const t = data.find((r) => r.captured_at)?.captured_at;
     if (t) $("runat").textContent = "· updated " + new Date(t).toLocaleString();
   }

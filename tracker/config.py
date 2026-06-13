@@ -37,7 +37,9 @@ ORIGIN = "BLR"  # Bangalore – Kempegowda International
 DESTINATIONS = ["DEL", "BOM", "HYD", "MAA", "CCU", "GOI", "PNQ", "AMD", "COK", "JAI"]
 
 TRIP_YEAR = int(os.getenv("TRIP_YEAR", "2026"))
-TRIP_MONTH = 11        # November
+# Months to track, as a comma-separated list (e.g. "8,11" = August + November).
+# Each is scanned independently; the frontend shows one window per month.
+TRIP_MONTHS = [int(m) for m in os.getenv("TRIP_MONTHS", "8,11").split(",") if m.strip()]
 NIGHTS = 3             # 3 nights / 4 days  ->  depart day D, return day D+3
 
 CURRENCY = "inr"       # Travelpayouts wants lowercase; SerpApi gets CURRENCY.upper()
@@ -78,23 +80,23 @@ RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///flights.db")
 
 
-def trip_combos() -> list[tuple[date, date]]:
-    """Every (depart, return) pair for an N-night stay inside the trip month.
+def trip_combos(month: int) -> list[tuple[date, date]]:
+    """Every (depart, return) pair for an N-night stay inside `month`.
 
     For a 30-day November with NIGHTS=3 this yields 27 combos:
     depart Nov 1 / return Nov 4  ...  depart Nov 27 / return Nov 30.
     """
-    last_day = calendar.monthrange(TRIP_YEAR, TRIP_MONTH)[1]
+    last_day = calendar.monthrange(TRIP_YEAR, month)[1]
     combos: list[tuple[date, date]] = []
     day = 1
     while day + NIGHTS <= last_day:
-        depart = date(TRIP_YEAR, TRIP_MONTH, day)
-        ret = date(TRIP_YEAR, TRIP_MONTH, day + NIGHTS)
+        depart = date(TRIP_YEAR, month, day)
+        ret = date(TRIP_YEAR, month, day + NIGHTS)
         combos.append((depart, ret))
         day += 1
     return combos
 
 
-def trip_month_str() -> str:
+def trip_month_str(month: int) -> str:
     """YYYY-MM string the calendar endpoint expects."""
-    return f"{TRIP_YEAR}-{TRIP_MONTH:02d}"
+    return f"{TRIP_YEAR}-{month:02d}"

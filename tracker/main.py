@@ -9,23 +9,26 @@ import httpx
 from . import analyze, clients, config, report, security, storage
 
 
-async def scan_cached(dests: list[str]) -> list[tuple[str, dict, dict, dict] | Exception]:
-    """Fetch both one-way calendars (outbound + return) for every destination, concurrently.
+async def scan_cached(dests: list[str], months: list[int]) -> list[tuple[str, dict] | Exception]:
+    """Fetch one-way calendars (outbound + return) per destination per month, concurrently.
 
-    The cache only serves one-way records, so a cached round-trip price isn't
-    available; round trips are built as "split" fares in analyze and confirmed
-    live via SerpApi for the gated candidates.
+    Returns (dest, {month: (out_ow, ret_ow)}). The cache only serves one-way
+    records, so a cached round-trip price isn't available; round trips are built
+    as "split" fares in analyze and confirmed live via SerpApi for candidates.
     """
     tp = clients.Travelpayouts(config.TRAVELPAYOUTS_TOKEN, config.CURRENCY, config.REQUEST_TIMEOUT)
-    month = config.trip_month_str()
     sem = asyncio.Semaphore(config.MAX_CONCURRENCY)
 
     async with httpx.AsyncClient(verify=clients.CA_BUNDLE) as client:
         async def for_dest(dest: str):
             async with sem:
-                out_ow = await tp.one_way_calendar(client, config.ORIGIN, dest, month)
-                ret_ow = await tp.one_way_calendar(client, dest, config.ORIGIN, month)
-                return dest, out_ow, ret_ow, {}  # no cached round-trip; see docstring
+                by_month: dict[int, tuple[dict, dict]] = {}
+                for m in months:
+                    ms = config.trip_month_str(m)
+                    out_ow = await tp.one_way_calendar(client, config.ORIGIN, dest, ms)
+                    ret_ow = await tp.one_way_calendar(client, dest, config.ORIGIN, ms)
+                    by_month[m] = (out_ow, ret_ow)
+                return dest, by_month
 
         return await asyncio.gather(*(for_dest(d) for d in dests), return_exceptions=True)
 
@@ -35,10 +38,10 @@ def main() -> None:
     storage.init_db()
     storage.seed_watchlist_if_empty(config.ORIGIN, config.DESTINATIONS)
     dests = storage.load_watchlist(config.ORIGIN) or config.DESTINATIONS
-    combos = config.trip_combos()
+    combos_by_month = {m: config.trip_combos(m) for m in config.TRIP_MONTHS}
     prev = storage.load_latest()
 
-    results = asyncio.run(scan_cached(dests))
+    results = asyncio.run(scan_cached(dests, config.TRIP_MONTHS))
 
     matrices: dict[str, list[dict]] = {}
     all_points: dict[tuple[str, str, str], float] = {}
@@ -48,8 +51,10 @@ def main() -> None:
         if isinstance(res, Exception):
             security.safe_print(f"[scan] route failed: {res!r}")
             continue
-        dest, out_ow, ret_ow, rt = res
-        rows = analyze.build_rows(out_ow, ret_ow, rt, combos, prev, dest)
+        dest, by_month = res
+        rows: list[dict] = []
+        for m, (out_ow, ret_ow) in by_month.items():
+            rows += analyze.build_rows(out_ow, ret_ow, {}, combos_by_month[m], prev, dest)
         matrices[dest] = rows
         all_points.update(analyze.points_from_rows(dest, rows))
         candidates += analyze.find_candidates(
